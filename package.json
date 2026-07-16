@@ -13,6 +13,7 @@
     "@langchain/core": "^1.2.3",
     "@langchain/langgraph": "^1.4.8",
     "@langchain/openai": "^1.5.5",
+    "@langchain/textsplitters": "^1.0.1",
     "@zilliz/milvus2-sdk-node": "^3.0.3",
     "next": "16.2.10",
     "pdf-parse": "^2.4.5",

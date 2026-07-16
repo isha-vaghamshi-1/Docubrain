@@ -1,11 +1,120 @@
+import {
+  DataType,
+  MetricType,
+  MilvusClient,
+  type RowData,
+} from "@zilliz/milvus2-sdk-node";
+import { EMBEDDING_DIM, env } from "./env";
+
 /**
- * Zilliz Cloud (Milvus) client.
- * Implemented in Phase B/C:
- * - ensure the collection exists (dim 1536, cosine)
- * - delete old chunks on re-upload (replace behavior)
- * - upsert chunk vectors + metadata
- * - similarity search for the chat pipeline
+ * Step B4 — Zilliz Cloud (Milvus) client.
+ *
+ * Responsibilities:
+ * - ensureCollection: create the collection + index on first use
+ * - deleteByFilename:  remove old chunks when a PDF is re-uploaded (replace)
+ * - insertChunks:      store chunk text + vector + metadata
  */
 
-// TODO (Phase B): implement ensureCollection, deleteByFilename, upsertChunks
-// TODO (Phase C): implement search(queryVector, topK)
+export interface ChunkRecord {
+  doc_id: string;
+  filename: string;
+  chunk_index: number;
+  text: string;
+  vector: number[];
+}
+
+// Reuse one client across requests (Next.js keeps module state between
+// invocations in the same server process).
+let client: MilvusClient | null = null;
+
+export function getZillizClient(): MilvusClient {
+  if (!client) {
+    client = new MilvusClient({
+      address: env.zillizUri,
+      token: env.zillizToken,
+    });
+  }
+  return client;
+}
+
+let collectionReady = false;
+
+/**
+ * Create the collection if it does not exist, then load it into memory.
+ *
+ * Schema:
+ * - id          auto-generated primary key
+ * - doc_id      which upload this chunk belongs to
+ * - filename    original PDF name (used for replace-on-reupload)
+ * - chunk_index position of the chunk inside the document
+ * - text        the chunk text itself (returned to the LLM later)
+ * - vector      1536-dim OpenAI embedding, compared with COSINE similarity
+ */
+export async function ensureCollection(): Promise<void> {
+  if (collectionReady) return;
+
+  const milvus = getZillizClient();
+  const { value: exists } = await milvus.hasCollection({
+    collection_name: env.zillizCollection,
+  });
+
+  if (!exists) {
+    await milvus.createCollection({
+      collection_name: env.zillizCollection,
+      fields: [
+        {
+          name: "id",
+          data_type: DataType.Int64,
+          is_primary_key: true,
+          autoID: true,
+        },
+        { name: "doc_id", data_type: DataType.VarChar, max_length: 64 },
+        { name: "filename", data_type: DataType.VarChar, max_length: 512 },
+        { name: "chunk_index", data_type: DataType.Int64 },
+        { name: "text", data_type: DataType.VarChar, max_length: 8192 },
+        {
+          name: "vector",
+          data_type: DataType.FloatVector,
+          dim: EMBEDDING_DIM,
+        },
+      ],
+    });
+
+    await milvus.createIndex({
+      collection_name: env.zillizCollection,
+      field_name: "vector",
+      index_type: "AUTOINDEX",
+      metric_type: MetricType.COSINE,
+    });
+  }
+
+  // A collection must be loaded before search/delete can run against it.
+  await milvus.loadCollectionSync({
+    collection_name: env.zillizCollection,
+  });
+
+  collectionReady = true;
+}
+
+/** Replace behavior: drop all chunks of a previously uploaded file. */
+export async function deleteByFilename(filename: string): Promise<void> {
+  const milvus = getZillizClient();
+  await milvus.delete({
+    collection_name: env.zillizCollection,
+    filter: `filename == "${filename.replace(/"/g, '\\"')}"`,
+  });
+}
+
+/** Insert the chunks of one document. */
+export async function insertChunks(records: ChunkRecord[]): Promise<void> {
+  if (records.length === 0) return;
+  const milvus = getZillizClient();
+  const res = await milvus.insert({
+    collection_name: env.zillizCollection,
+    // Milvus SDK expects generic row objects, so widen our typed records.
+    data: records.map((r): RowData => ({ ...r })),
+  });
+  if (res.status.error_code !== "Success") {
+    throw new Error(`Zilliz insert failed: ${res.status.reason}`);
+  }
+}
