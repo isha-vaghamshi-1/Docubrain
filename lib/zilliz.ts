@@ -7,12 +7,13 @@ import {
 import { EMBEDDING_DIM, env } from "./env";
 
 /**
- * Step B4 — Zilliz Cloud (Milvus) client.
+ * Zilliz Cloud (Milvus) client.
  *
  * Responsibilities:
- * - ensureCollection: create the collection + index on first use
- * - deleteByFilename:  remove old chunks when a PDF is re-uploaded (replace)
- * - insertChunks:      store chunk text + vector + metadata
+ * - ensureCollection: create the collection + index on first use (Phase B)
+ * - deleteByFilename:  remove old chunks when a PDF is re-uploaded (Phase B)
+ * - insertChunks:      store chunk text + vector + metadata (Phase B)
+ * - searchChunks:      similarity search for the chat pipeline (Phase C)
  */
 
 export interface ChunkRecord {
@@ -117,4 +118,47 @@ export async function insertChunks(records: ChunkRecord[]): Promise<void> {
   if (res.status.error_code !== "Success") {
     throw new Error(`Zilliz insert failed: ${res.status.reason}`);
   }
+}
+
+/** One search hit: a stored chunk plus its similarity score. */
+export interface RetrievedChunk {
+  text: string;
+  filename: string;
+  chunk_index: number;
+  /** COSINE similarity: 1 = identical meaning, 0 = unrelated. */
+  score: number;
+}
+
+/**
+ * Step C1 — Vector similarity search.
+ *
+ * Takes the already-embedded question vector and asks Zilliz for the
+ * `topK` most similar chunks. Because the collection uses the COSINE
+ * metric, each hit comes back with a score where HIGHER = more similar.
+ * The grade node will later compare these scores to the threshold.
+ */
+export async function searchChunks(
+  queryVector: number[],
+  topK: number = env.topK
+): Promise<RetrievedChunk[]> {
+  await ensureCollection();
+
+  const milvus = getZillizClient();
+  const res = await milvus.search({
+    collection_name: env.zillizCollection,
+    data: [queryVector],
+    limit: topK,
+    output_fields: ["text", "filename", "chunk_index"],
+  });
+
+  if (res.status.error_code !== "Success") {
+    throw new Error(`Zilliz search failed: ${res.status.reason}`);
+  }
+
+  return res.results.map((hit) => ({
+    text: String(hit.text),
+    filename: String(hit.filename),
+    chunk_index: Number(hit.chunk_index),
+    score: Number(hit.score),
+  }));
 }
