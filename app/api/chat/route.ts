@@ -5,11 +5,11 @@ import { answerQuestion } from "@/lib/graph/ragGraph";
  * Step C4 — POST /api/chat
  *
  * Body:     { "question": "..." }
- * Response: { "answer": "...", "sources": [...] }
- *           or { "answer": "sorry, no data found", "sources": [] }
+ * Response: { "answer": "...", "sources": [...], "tokens": {...} }
+ *           or { "answer": "sorry, no data found", "sources": [], "tokens": {...} }
  *
- * (The UI will only display the answer — sources stay in the API response
- * for debugging/tuning the score threshold.)
+ * (The UI shows the answer only. sources + tokens stay in the API response
+ * for debugging / Task 2 compare.)
  */
 
 export const runtime = "nodejs";
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { answer, sources } = await answerQuestion(question.trim());
+    const { answer, sources, tokens } = await answerQuestion(question.trim());
 
     return NextResponse.json({
       answer,
@@ -36,6 +36,7 @@ export async function POST(request: Request) {
         chunk_index: s.chunk_index,
         score: s.score,
       })),
+      tokens,
     });
   } catch (error) {
     console.error("Chat failed:", error);
