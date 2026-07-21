@@ -162,3 +162,31 @@ export async function searchChunks(
     score: Number(hit.score),
   }));
 }
+
+/**
+ * Task 2 Path B — load ALL stored chunk texts (no vector search).
+ * Used to send full uploaded document content straight to the LLM.
+ */
+export async function listAllChunkTexts(): Promise<string[]> {
+  await ensureCollection();
+
+  const milvus = getZillizClient();
+  const res = await milvus.query({
+    collection_name: env.zillizCollection,
+    filter: "chunk_index >= 0",
+    output_fields: ["text", "filename", "chunk_index"],
+    limit: 16384,
+  });
+
+  if (res.status.error_code !== "Success") {
+    throw new Error(`Zilliz query failed: ${res.status.reason}`);
+  }
+
+  const rows = [...res.data].sort((a, b) => {
+    const byFile = String(a.filename).localeCompare(String(b.filename));
+    if (byFile !== 0) return byFile;
+    return Number(a.chunk_index) - Number(b.chunk_index);
+  });
+
+  return rows.map((row) => String(row.text));
+}
