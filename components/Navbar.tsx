@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /**
- * Phase D · Step 3 — Simple nav between Chat (/) and Upload (/upload).
+ * Simple nav between Chat, Upload, and Compare.
  * Client component because usePathname() is needed to highlight
  * the link of the page you are currently on.
  */
@@ -12,6 +12,7 @@ import { usePathname } from "next/navigation";
 const links = [
   { href: "/", label: "Chat" },
   { href: "/upload", label: "Upload" },
+  { href: "/compare", label: "Compare" },
 ] as const;
 
 export function Navbar() {
@@ -19,7 +20,7 @@ export function Navbar() {
 
   return (
     <nav className="border-b border-gray-200 dark:border-gray-800">
-      <div className="mx-auto flex w-full max-w-2xl items-center gap-6 px-6 py-3">
+      <div className="mx-auto flex w-full max-w-4xl items-center gap-6 px-6 py-3">
         <span className="text-sm font-bold">DocuBrain</span>
         <div className="flex gap-1">
           {links.map((link) => {
